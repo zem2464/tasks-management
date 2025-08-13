@@ -54,4 +54,23 @@ export class DistributedCacheService {
       });
     });
   }
+
+  // JWT Blacklist
+  async blacklistJwt(token: string, exp: number): Promise<void> {
+    // Store the token in Redis with TTL until its expiration
+    const ttl = exp - Math.floor(Date.now() / 1000);
+    if (ttl > 0) {
+      await this.resilienceService.resilientCall(() =>
+        this.redis.set(`jwt:blacklist:${token}`, '1', 'EX', ttl)
+      );
+      this.logger.debug(`JWT blacklisted: ${token} for ${ttl}s`);
+    }
+  }
+
+  async isJwtBlacklisted(token: string): Promise<boolean> {
+    const result = await this.resilienceService.resilientCall(() =>
+      this.redis.get(`jwt:blacklist:${token}`)
+    );
+    return !!result;
+  }
 }

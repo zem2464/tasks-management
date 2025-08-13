@@ -5,12 +5,14 @@ import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import * as bcrypt from 'bcrypt';
 import { randomBytes } from 'crypto';
+import { DistributedCacheService } from '../../common/services/distributed-cache.service';
 
 @Injectable()
 export class AuthService {
   constructor(
     private readonly usersService: UsersService,
     private readonly jwtService: JwtService,
+    private readonly cache: DistributedCacheService,
   ) {}
 
   async login(loginDto: LoginDto) {
@@ -102,8 +104,23 @@ export class AuthService {
     };
   }
 
-  async logout(userId: string) {
-  await this.usersService.update(userId, { refreshToken: undefined });
+  async logout(userId: string, token?: string) {
+    // Clear refresh token from database
+    await this.usersService.update(userId, { refreshToken: undefined });
+    
+    // Blacklist the JWT token if provided
+    if (token) {
+      try {
+        const decoded = this.jwtService.decode(token) as any;
+        if (decoded && decoded.exp) {
+          await this.cache.blacklistJwt(token, decoded.exp);
+        }
+      } catch (error) {
+        // If token decode fails, still proceed with logout
+        console.warn('Failed to decode JWT for blacklisting:', error);
+      }
+    }
+    
     return { message: 'Logged out' };
   }
 
