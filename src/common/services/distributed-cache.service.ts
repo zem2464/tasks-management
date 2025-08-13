@@ -1,0 +1,51 @@
+import { Injectable, Logger } from '@nestjs/common';
+import Redis from 'ioredis';
+
+@Injectable()
+export class DistributedCacheService {
+  private readonly logger = new Logger(DistributedCacheService.name);
+  private readonly redis: Redis;
+
+  constructor() {
+    this.redis = new Redis({
+      host: process.env.REDIS_HOST || 'localhost',
+      port: Number(process.env.REDIS_PORT) || 6379,
+    });
+  }
+
+  async set(key: string, value: any, ttlSeconds = 300): Promise<void> {
+    await this.redis.set(key, JSON.stringify(value), 'EX', ttlSeconds);
+    this.logger.debug(`Cache set: ${key}`);
+  }
+
+  async get<T>(key: string): Promise<T | null> {
+    const data = await this.redis.get(key);
+    if (!data) return null;
+    return JSON.parse(data) as T;
+  }
+
+  async delete(key: string): Promise<void> {
+    await this.redis.del(key);
+    this.logger.debug(`Cache deleted: ${key}`);
+  }
+
+  async publishInvalidation(channel: string, key: string): Promise<void> {
+    await this.redis.publish(channel, key);
+    this.logger.debug(`Published cache invalidation for key: ${key} on channel: ${channel}`);
+  }
+
+  subscribeInvalidation(channel: string, onInvalidate: (key: string) => void): void {
+    const sub = new Redis({
+      host: process.env.REDIS_HOST || 'localhost',
+      port: Number(process.env.REDIS_PORT) || 6379,
+    });
+    sub.subscribe(channel, () => {
+      sub.on('message', (chan, key) => {
+        if (chan === channel) {
+          this.logger.debug(`Received cache invalidation for key: ${key} on channel: ${channel}`);
+          onInvalidate(key);
+        }
+      });
+    });
+  }
+}
