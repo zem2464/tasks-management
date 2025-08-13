@@ -18,8 +18,13 @@ export class User {
   @Exclude({ toPlainOnly: true })
   password: string;
 
+
   @Column({ default: 'user' })
   role: string;
+
+  @Column({ name: 'refresh_token', nullable: true })
+  @Exclude({ toPlainOnly: true })
+  refreshToken?: string;
 
   @OneToMany(() => Task, (task) => task.user)
   tasks: Task[];
