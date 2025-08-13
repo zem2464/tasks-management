@@ -32,12 +32,21 @@ export class TasksService {
     return savedTask;
   }
 
-  async findAll(): Promise<Task[]> {
-    // Inefficient implementation: retrieves all tasks without pagination
-    // and loads all relations, causing potential performance issues
-    return this.tasksRepository.find({
+  async findAll(filter?: any): Promise<{ data: Task[]; count: number; page: number; limit: number }> {
+    // Efficient implementation: filtering and pagination at DB level
+    const { status, priority, page = 1, limit = 10 } = filter || {};
+    const where: any = {};
+    if (status) where.status = status;
+    if (priority) where.priority = priority;
+
+    const [data, count] = await this.tasksRepository.findAndCount({
+      where,
       relations: ['user'],
+      skip: (page - 1) * limit,
+      take: limit,
+      order: { createdAt: 'DESC' },
     });
+    return { data, count, page, limit };
   }
 
   async findOne(id: string): Promise<Task> {
