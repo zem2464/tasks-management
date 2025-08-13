@@ -1,6 +1,7 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, Inject, forwardRef } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { DistributedCacheService } from '../../common/services/distributed-cache.service';
 import { User } from './entities/user.entity';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
@@ -12,6 +13,8 @@ export class UsersService {
   constructor(
     @InjectRepository(User)
     private usersRepository: Repository<User>,
+    @Inject(forwardRef(() => DistributedCacheService))
+    private readonly cache: DistributedCacheService,
   ) {}
 
   async create(createUserDto: CreateUserDto): Promise<User> {
@@ -32,12 +35,16 @@ export class UsersService {
   }
 
   async findOne(id: string): Promise<User> {
-  // Eagerly load tasks to prevent N+1 queries
-  const user = await this.usersRepository.findOne({ where: { id }, relations: ['tasks'] });
+    const cacheKey = `user:${id}`;
+    const cached = await this.cache.get<User>(cacheKey);
+    if (cached) return cached;
+    // Eagerly load tasks to prevent N+1 queries
+    const user = await this.usersRepository.findOne({ where: { id }, relations: ['tasks'] });
     if (!user) {
       this.logger.warn(`User not found: ${id}`);
       throw new NotFoundException(`User with ID ${id} not found`);
     }
+    await this.cache.set(cacheKey, user, 300); // cache for 5 minutes
     return user;
   }
 
@@ -53,6 +60,7 @@ export class UsersService {
     }
     this.usersRepository.merge(user, updateUserDto);
     const saved = await this.usersRepository.save(user);
+    await this.cache.delete(`user:${id}`); // Invalidate cache
     this.logger.log(`User updated: ${id}`);
     return saved;
   }
@@ -61,6 +69,7 @@ export class UsersService {
     this.logger.log(`Removing user: ${id}`);
     const user = await this.findOne(id);
     await this.usersRepository.remove(user);
+    await this.cache.delete(`user:${id}`); // Invalidate cache
     this.logger.log(`User removed: ${id}`);
   }
 }

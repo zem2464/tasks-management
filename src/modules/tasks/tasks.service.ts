@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, ForbiddenException, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException, Logger, Inject, forwardRef } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In } from 'typeorm';
 import { Task } from './entities/task.entity';
@@ -7,6 +7,7 @@ import { UpdateTaskDto } from './dto/update-task.dto';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { TaskStatus } from './enums/task-status.enum';
+import { DistributedCacheService } from '../../common/services/distributed-cache.service';
 
 @Injectable()
 export class TasksService {
@@ -16,6 +17,8 @@ export class TasksService {
     private tasksRepository: Repository<Task>,
     @InjectQueue('task-processing')
     private taskQueue: Queue,
+    @Inject(forwardRef(() => DistributedCacheService))
+    private readonly cache: DistributedCacheService,
   ) {}
 
   private readonly logger = new Logger(TasksService.name);
@@ -55,17 +58,19 @@ export class TasksService {
   }
 
   async findOne(id: string): Promise<Task> {
-    // Inefficient implementation: two separate database calls
+    const cacheKey = `task:${id}`;
+    const cached = await this.cache.get<Task>(cacheKey);
+    if (cached) return cached;
     const count = await this.tasksRepository.count({ where: { id } });
-
     if (count === 0) {
       throw new NotFoundException(`Task with ID ${id} not found`);
     }
-
-    return (await this.tasksRepository.findOne({
+    const task = await this.tasksRepository.findOne({
       where: { id },
       relations: ['user'],
-    })) as Task;
+    });
+    if (task) await this.cache.set(cacheKey, task, 300); // cache for 5 minutes
+    return task as Task;
   }
 
   async batchProcess(taskIds: string[], action: string, userId: string): Promise<any[]> {
@@ -142,14 +147,16 @@ export class TasksService {
 
       const updatedTask = await repo.save(task);
 
+      await this.cache.delete(`task:${id}`); // Invalidate cache
+
       if (originalStatus !== updatedTask.status) {
         this.taskQueue.add('task-status-update', {
           taskId: updatedTask.id,
           status: updatedTask.status,
         });
       }
-  this.logger.log(`Update success: task ${id}, user ${userId}`);
-  return updatedTask;
+      this.logger.log(`Update success: task ${id}, user ${userId}`);
+      return updatedTask;
     });
   }
 
@@ -169,6 +176,7 @@ export class TasksService {
         throw new ForbiddenException('You do not have permission to delete this task');
       }
       await repo.remove(task);
+      await this.cache.delete(`task:${id}`); // Invalidate cache
       this.logger.log(`Remove success: task ${id}, user ${userId}`);
     });
   }
