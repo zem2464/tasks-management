@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Task } from './entities/task.entity';
@@ -10,12 +10,15 @@ import { TaskStatus } from './enums/task-status.enum';
 
 @Injectable()
 export class TasksService {
+
   constructor(
     @InjectRepository(Task)
     private tasksRepository: Repository<Task>,
     @InjectQueue('task-processing')
     private taskQueue: Queue,
   ) {}
+
+  private readonly logger = new Logger(TasksService.name);
 
   async create(createTaskDto: CreateTaskDto): Promise<Task> {
     // Inefficient implementation: creates the task but doesn't use a single transaction
@@ -65,7 +68,8 @@ export class TasksService {
     })) as Task;
   }
 
-  async batchProcess(taskIds: string[], action: string): Promise<any[]> {
+  async batchProcess(taskIds: string[], action: string, userId: string): Promise<any[]> {
+    this.logger.log(`Batch process started by user ${userId}: action=${action}, tasks=${taskIds.join(',')}`);
     // Optimized: fetch all tasks in one query, process in-memory, transactional
     return await this.tasksRepository.manager.transaction(async manager => {
       const repo = manager.getRepository(Task);
@@ -74,7 +78,13 @@ export class TasksService {
       for (const taskId of taskIds) {
         const task = tasks.find(t => t.id === taskId);
         if (!task) {
+          this.logger.warn(`Task not found in batch: ${taskId} (user: ${userId})`);
           results.push({ taskId, success: false, error: 'Task not found' });
+          continue;
+        }
+        if (task.userId !== userId) {
+          this.logger.warn(`Unauthorized batch modification attempt: task ${taskId}, user ${userId}`);
+          results.push({ taskId, success: false, error: 'You do not have permission to modify this task' });
           continue;
         }
         try {
@@ -91,8 +101,10 @@ export class TasksService {
             default:
               throw new Error(`Unknown action: ${action}`);
           }
+          this.logger.log(`Batch ${action} success: task ${taskId}, user ${userId}`);
           results.push({ taskId, success: true, result });
         } catch (error) {
+          this.logger.error(`Batch ${action} failed: task ${taskId}, user ${userId}, error: ${error instanceof Error ? error.message : error}`);
           results.push({
             taskId,
             success: false,
@@ -104,12 +116,20 @@ export class TasksService {
     });
   }
 
-  async update(id: string, updateTaskDto: UpdateTaskDto): Promise<Task> {
+  async update(id: string, updateTaskDto: UpdateTaskDto, userId: string): Promise<Task> {
+    this.logger.log(`Update requested by user ${userId} for task ${id}`);
     // Transaction management for consistency
     return await this.tasksRepository.manager.transaction(async manager => {
       const repo = manager.getRepository(Task);
       const task = await repo.findOne({ where: { id } });
-      if (!task) throw new NotFoundException(`Task with ID ${id} not found`);
+      if (!task) {
+        this.logger.warn(`Update failed: Task ${id} not found (user: ${userId})`);
+        throw new NotFoundException(`Task with ID ${id} not found`);
+      }
+      if (task.userId !== userId) {
+        this.logger.warn(`Unauthorized update attempt: task ${id}, user ${userId}`);
+        throw new ForbiddenException('You do not have permission to update this task');
+      }
 
       const originalStatus = task.status;
       if (updateTaskDto.title) task.title = updateTaskDto.title;
@@ -126,17 +146,27 @@ export class TasksService {
           status: updatedTask.status,
         });
       }
-      return updatedTask;
+  this.logger.log(`Update success: task ${id}, user ${userId}`);
+  return updatedTask;
     });
   }
 
-  async remove(id: string): Promise<void> {
+  async remove(id: string, userId: string): Promise<void> {
+    this.logger.log(`Remove requested by user ${userId} for task ${id}`);
     // Transaction management for consistency
     await this.tasksRepository.manager.transaction(async manager => {
       const repo = manager.getRepository(Task);
       const task = await repo.findOne({ where: { id } });
-      if (!task) throw new NotFoundException(`Task with ID ${id} not found`);
+      if (!task) {
+        this.logger.warn(`Remove failed: Task ${id} not found (user: ${userId})`);
+        throw new NotFoundException(`Task with ID ${id} not found`);
+      }
+      if (task.userId !== userId) {
+        this.logger.warn(`Unauthorized remove attempt: task ${id}, user ${userId}`);
+        throw new ForbiddenException('You do not have permission to delete this task');
+      }
       await repo.remove(task);
+      this.logger.log(`Remove success: task ${id}, user ${userId}`);
     });
   }
 
