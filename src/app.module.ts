@@ -9,9 +9,10 @@ import { TasksModule } from './modules/tasks/tasks.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { TaskProcessorModule } from './queues/task-processor/task-processor.module';
 import { ScheduledTasksModule } from './queues/scheduled-tasks/scheduled-tasks.module';
-import { CacheService } from './common/services/cache.service';
+import { DistributedCacheService } from './common/services/distributed-cache.service';
 import jwtConfig from './config/jwt.config';
 import { HealthModule } from './modules/health/health.module';
+import { ResilienceService } from '@common/services/resilience.service';
 
 @Module({
   imports: [
@@ -20,7 +21,7 @@ import { HealthModule } from './modules/health/health.module';
       isGlobal: true,
       load: [jwtConfig],
     }),
-    
+
     // Database
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
@@ -37,10 +38,10 @@ import { HealthModule } from './modules/health/health.module';
         logging: configService.get('NODE_ENV') === 'development',
       }),
     }),
-    
+
     // Scheduling
     ScheduleModule.forRoot(),
-    
+
     // Queue
     BullModule.forRootAsync({
       imports: [ConfigModule],
@@ -52,38 +53,30 @@ import { HealthModule } from './modules/health/health.module';
         },
       }),
     }),
-    
+
     // Rate limiting
     ThrottlerModule.forRootAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
-      useFactory: (configService: ConfigService) => ([
+      useFactory: (configService: ConfigService) => [
         {
           ttl: 60,
           limit: 10,
         },
-      ]),
+      ],
     }),
-    
+
     // Feature modules
     UsersModule,
     TasksModule,
     AuthModule,
-  HealthModule,
-    
+    HealthModule,
+
     // Queue processing modules
     TaskProcessorModule,
     ScheduledTasksModule,
   ],
-  providers: [
-    // Inefficient: Global cache service with no configuration options
-    // This creates a single in-memory cache instance shared across all modules
-    CacheService
-  ],
-  exports: [
-    // Exporting the cache service makes it available to other modules
-    // but creates tight coupling
-    CacheService
-  ]
+  providers: [ResilienceService, DistributedCacheService],
+  exports: [ResilienceService, DistributedCacheService],
 })
-export class AppModule {} 
+export class AppModule {}
