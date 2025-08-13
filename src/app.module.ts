@@ -11,6 +11,7 @@ import { TaskProcessorModule } from './queues/task-processor/task-processor.modu
 import { ScheduledTasksModule } from './queues/scheduled-tasks/scheduled-tasks.module';
 import { CacheService } from './common/services/cache.service';
 import jwtConfig from './config/jwt.config';
+import { HealthModule } from './modules/health/health.module';
 
 @Module({
   imports: [
@@ -68,6 +69,7 @@ import jwtConfig from './config/jwt.config';
     UsersModule,
     TasksModule,
     AuthModule,
+  HealthModule,
     
     // Queue processing modules
     TaskProcessorModule,

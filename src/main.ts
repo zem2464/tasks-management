@@ -1,11 +1,14 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { ValidationPipe } from '@nestjs/common';
+import { CorrelationIdMiddleware } from './common/middleware/correlation-id.middleware';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+  // Correlation ID middleware for request tracing
+  app.use(new CorrelationIdMiddleware().use);
   
   // Global validation pipe
   app.useGlobalPipes(
