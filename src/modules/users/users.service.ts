@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User } from './entities/user.entity';
@@ -8,18 +8,22 @@ import * as bcrypt from 'bcrypt';
 
 @Injectable()
 export class UsersService {
+  private readonly logger = new Logger(UsersService.name);
   constructor(
     @InjectRepository(User)
     private usersRepository: Repository<User>,
   ) {}
 
   async create(createUserDto: CreateUserDto): Promise<User> {
+    this.logger.log(`Creating user: ${createUserDto.email}`);
     const hashedPassword = await bcrypt.hash(createUserDto.password, 10);
     const user = this.usersRepository.create({
       ...createUserDto,
       password: hashedPassword,
     });
-    return this.usersRepository.save(user);
+    const saved = await this.usersRepository.save(user);
+    this.logger.log(`User created: ${saved.id}`);
+    return saved;
   }
 
   findAll(): Promise<User[]> {
@@ -29,6 +33,7 @@ export class UsersService {
   async findOne(id: string): Promise<User> {
     const user = await this.usersRepository.findOne({ where: { id } });
     if (!user) {
+      this.logger.warn(`User not found: ${id}`);
       throw new NotFoundException(`User with ID ${id} not found`);
     }
     return user;
@@ -39,18 +44,21 @@ export class UsersService {
   }
 
   async update(id: string, updateUserDto: UpdateUserDto): Promise<User> {
+    this.logger.log(`Updating user: ${id}`);
     const user = await this.findOne(id);
-    
     if (updateUserDto.password) {
       updateUserDto.password = await bcrypt.hash(updateUserDto.password, 10);
     }
-    
     this.usersRepository.merge(user, updateUserDto);
-    return this.usersRepository.save(user);
+    const saved = await this.usersRepository.save(user);
+    this.logger.log(`User updated: ${id}`);
+    return saved;
   }
 
   async remove(id: string): Promise<void> {
+    this.logger.log(`Removing user: ${id}`);
     const user = await this.findOne(id);
     await this.usersRepository.remove(user);
+    this.logger.log(`User removed: ${id}`);
   }
-} 
+}
