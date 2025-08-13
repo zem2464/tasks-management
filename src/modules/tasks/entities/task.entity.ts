@@ -1,9 +1,13 @@
-import { Column, CreateDateColumn, Entity, JoinColumn, ManyToOne, PrimaryGeneratedColumn, UpdateDateColumn } from 'typeorm';
+import { Column, CreateDateColumn, Entity, JoinColumn, ManyToOne, PrimaryGeneratedColumn, UpdateDateColumn, Index } from 'typeorm';
 import { User } from '../../users/entities/user.entity';
 import { TaskStatus } from '../enums/task-status.enum';
 import { TaskPriority } from '../enums/task-priority.enum';
 
 @Entity('tasks')
+@Index(['userId'])
+@Index(['status'])
+@Index(['priority'])
+@Index(['dueDate'])
 export class Task {
   @PrimaryGeneratedColumn('uuid')
   id: string;
