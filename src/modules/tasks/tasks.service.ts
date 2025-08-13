@@ -64,36 +64,39 @@ export class TasksService {
   }
 
   async update(id: string, updateTaskDto: UpdateTaskDto): Promise<Task> {
-    // Inefficient implementation: multiple database calls
-    // and no transaction handling
-    const task = await this.findOne(id);
+    // Transaction management for consistency
+    return await this.tasksRepository.manager.transaction(async (manager) => {
+      const repo = manager.getRepository(Task);
+      const task = await repo.findOne({ where: { id } });
+      if (!task) throw new NotFoundException(`Task with ID ${id} not found`);
 
-    const originalStatus = task.status;
+      const originalStatus = task.status;
+      if (updateTaskDto.title) task.title = updateTaskDto.title;
+      if (updateTaskDto.description) task.description = updateTaskDto.description;
+      if (updateTaskDto.status) task.status = updateTaskDto.status;
+      if (updateTaskDto.priority) task.priority = updateTaskDto.priority;
+      if (updateTaskDto.dueDate) task.dueDate = updateTaskDto.dueDate;
 
-    // Directly update each field individually
-    if (updateTaskDto.title) task.title = updateTaskDto.title;
-    if (updateTaskDto.description) task.description = updateTaskDto.description;
-    if (updateTaskDto.status) task.status = updateTaskDto.status;
-    if (updateTaskDto.priority) task.priority = updateTaskDto.priority;
-    if (updateTaskDto.dueDate) task.dueDate = updateTaskDto.dueDate;
+      const updatedTask = await repo.save(task);
 
-    const updatedTask = await this.tasksRepository.save(task);
-
-    // Add to queue if status changed, but without proper error handling
-    if (originalStatus !== updatedTask.status) {
-      this.taskQueue.add('task-status-update', {
-        taskId: updatedTask.id,
-        status: updatedTask.status,
-      });
-    }
-
-    return updatedTask;
+      if (originalStatus !== updatedTask.status) {
+        this.taskQueue.add('task-status-update', {
+          taskId: updatedTask.id,
+          status: updatedTask.status,
+        });
+      }
+      return updatedTask;
+    });
   }
 
   async remove(id: string): Promise<void> {
-    // Inefficient implementation: two separate database calls
-    const task = await this.findOne(id);
-    await this.tasksRepository.remove(task);
+    // Transaction management for consistency
+    await this.tasksRepository.manager.transaction(async (manager) => {
+      const repo = manager.getRepository(Task);
+      const task = await repo.findOne({ where: { id } });
+      if (!task) throw new NotFoundException(`Task with ID ${id} not found`);
+      await repo.remove(task);
+    });
   }
 
   async findByStatus(status: TaskStatus): Promise<Task[]> {
@@ -107,5 +110,18 @@ export class TasksService {
     const task = await this.findOne(id);
     task.status = status as any;
     return this.tasksRepository.save(task);
+  }
+
+  async getStats() {
+    // Efficient SQL aggregation for statistics
+    const qb = this.tasksRepository.createQueryBuilder('task');
+    const [total, completed, inProgress, pending, highPriority] = await Promise.all([
+      qb.getCount(),
+      qb.where('task.status = :status', { status: TaskStatus.COMPLETED }).getCount(),
+      qb.where('task.status = :status', { status: TaskStatus.IN_PROGRESS }).getCount(),
+      qb.where('task.status = :status', { status: TaskStatus.PENDING }).getCount(),
+      qb.where('task.priority = :priority', { priority: 'HIGH' }).getCount(),
+    ]);
+    return { total, completed, inProgress, pending, highPriority };
   }
 }
