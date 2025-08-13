@@ -66,19 +66,26 @@ export class TasksService {
   }
 
   async batchProcess(taskIds: string[], action: string): Promise<any[]> {
-    // Transactional batch processing for updates/deletes
+    // Optimized: fetch all tasks in one query, process in-memory, transactional
     return await this.tasksRepository.manager.transaction(async manager => {
       const repo = manager.getRepository(Task);
+      const tasks = await repo.findByIds(taskIds);
       const results = [];
       for (const taskId of taskIds) {
+        const task = tasks.find(t => t.id === taskId);
+        if (!task) {
+          results.push({ taskId, success: false, error: 'Task not found' });
+          continue;
+        }
         try {
           let result;
           switch (action) {
             case 'complete':
-              result = await this.update(taskId, { status: TaskStatus.COMPLETED });
+              task.status = TaskStatus.COMPLETED;
+              result = await repo.save(task);
               break;
             case 'delete':
-              await this.remove(taskId);
+              await repo.remove(task);
               result = { deleted: true };
               break;
             default:

@@ -19,6 +19,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RateLimitGuard } from '../../common/guards/rate-limit.guard';
 import { RateLimit } from '../../common/decorators/rate-limit.decorator';
 import { TaskFilterDto } from './dto/task-filter.dto';
+import { BatchTaskDto } from './dto/batch-task.dto';
 
 @ApiTags('tasks')
 @Controller('tasks')
@@ -76,8 +77,8 @@ export class TasksController {
 
   @Post('batch')
   @ApiOperation({ summary: 'Batch process multiple tasks' })
-  async batchProcess(@Body() operations: { tasks: string[]; action: string }) {
-    const { tasks: taskIds, action } = operations;
-    return this.tasksService.batchProcess(taskIds, action);
+  async batchProcess(@Body() batchTaskDto: BatchTaskDto) {
+    const { tasks, action } = batchTaskDto;
+    return this.tasksService.batchProcess(tasks, action);
   }
 }
