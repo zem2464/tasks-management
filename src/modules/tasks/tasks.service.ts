@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, ForbiddenException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, In } from 'typeorm';
 import { Task } from './entities/task.entity';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
@@ -73,7 +73,8 @@ export class TasksService {
     // Optimized: fetch all tasks in one query, process in-memory, transactional
     return await this.tasksRepository.manager.transaction(async manager => {
       const repo = manager.getRepository(Task);
-      const tasks = await repo.findByIds(taskIds);
+      // Fetch tasks with user relation to avoid N+1 queries
+      const tasks = await repo.find({ where: { id: In(taskIds) }, relations: ['user'] });
       const results = [];
       for (const taskId of taskIds) {
         const task = tasks.find(t => t.id === taskId);
@@ -121,7 +122,8 @@ export class TasksService {
     // Transaction management for consistency
     return await this.tasksRepository.manager.transaction(async manager => {
       const repo = manager.getRepository(Task);
-      const task = await repo.findOne({ where: { id } });
+      // Fetch task with user relation to avoid N+1 queries
+      const task = await repo.findOne({ where: { id }, relations: ['user'] });
       if (!task) {
         this.logger.warn(`Update failed: Task ${id} not found (user: ${userId})`);
         throw new NotFoundException(`Task with ID ${id} not found`);
@@ -156,7 +158,8 @@ export class TasksService {
     // Transaction management for consistency
     await this.tasksRepository.manager.transaction(async manager => {
       const repo = manager.getRepository(Task);
-      const task = await repo.findOne({ where: { id } });
+      // Fetch task with user relation to avoid N+1 queries
+      const task = await repo.findOne({ where: { id }, relations: ['user'] });
       if (!task) {
         this.logger.warn(`Remove failed: Task ${id} not found (user: ${userId})`);
         throw new NotFoundException(`Task with ID ${id} not found`);
