@@ -32,7 +32,9 @@ export class TasksService {
     return savedTask;
   }
 
-  async findAll(filter?: any): Promise<{ data: Task[]; count: number; page: number; limit: number }> {
+  async findAll(
+    filter?: any,
+  ): Promise<{ data: Task[]; count: number; page: number; limit: number }> {
     // Efficient implementation: filtering and pagination at DB level
     const { status, priority, page = 1, limit = 10 } = filter || {};
     const where: any = {};
@@ -63,9 +65,41 @@ export class TasksService {
     })) as Task;
   }
 
+  async batchProcess(taskIds: string[], action: string): Promise<any[]> {
+    // Transactional batch processing for updates/deletes
+    return await this.tasksRepository.manager.transaction(async manager => {
+      const repo = manager.getRepository(Task);
+      const results = [];
+      for (const taskId of taskIds) {
+        try {
+          let result;
+          switch (action) {
+            case 'complete':
+              result = await this.update(taskId, { status: TaskStatus.COMPLETED });
+              break;
+            case 'delete':
+              await this.remove(taskId);
+              result = { deleted: true };
+              break;
+            default:
+              throw new Error(`Unknown action: ${action}`);
+          }
+          results.push({ taskId, success: true, result });
+        } catch (error) {
+          results.push({
+            taskId,
+            success: false,
+            error: error instanceof Error ? error.message : 'Unknown error',
+          });
+        }
+      }
+      return results;
+    });
+  }
+
   async update(id: string, updateTaskDto: UpdateTaskDto): Promise<Task> {
     // Transaction management for consistency
-    return await this.tasksRepository.manager.transaction(async (manager) => {
+    return await this.tasksRepository.manager.transaction(async manager => {
       const repo = manager.getRepository(Task);
       const task = await repo.findOne({ where: { id } });
       if (!task) throw new NotFoundException(`Task with ID ${id} not found`);
@@ -91,7 +125,7 @@ export class TasksService {
 
   async remove(id: string): Promise<void> {
     // Transaction management for consistency
-    await this.tasksRepository.manager.transaction(async (manager) => {
+    await this.tasksRepository.manager.transaction(async manager => {
       const repo = manager.getRepository(Task);
       const task = await repo.findOne({ where: { id } });
       if (!task) throw new NotFoundException(`Task with ID ${id} not found`);
